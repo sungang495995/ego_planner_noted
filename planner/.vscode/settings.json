@@ -1,0 +1,10 @@
+{
+    "files.associations": {
+        "bitset": "cpp",
+        "random": "cpp",
+        "memory": "cpp",
+        "optional": "cpp",
+        "*.tcc": "cpp",
+        "vector": "cpp"
+    }
+}
