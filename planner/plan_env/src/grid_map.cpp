@@ -10,9 +10,11 @@ void GridMap::initMap(ros::NodeHandle &nh)
   /* get parameter */
   double x_size, y_size, z_size;
   node_.param("grid_map/resolution", mp_.resolution_, -1.0);
+  //地图大小40*40*3，原参数
   node_.param("grid_map/map_size_x", x_size, -1.0);
   node_.param("grid_map/map_size_y", y_size, -1.0);
   node_.param("grid_map/map_size_z", z_size, -1.0);
+  //局部更新范围，5
   node_.param("grid_map/local_update_range_x", mp_.local_update_range_(0), -1.0);
   node_.param("grid_map/local_update_range_y", mp_.local_update_range_(1), -1.0);
   node_.param("grid_map/local_update_range_z", mp_.local_update_range_(2), -1.0);
@@ -66,6 +68,7 @@ void GridMap::initMap(ros::NodeHandle &nh)
   cout << "max: " << mp_.clamp_max_log_ << endl;
   cout << "thresh log: " << mp_.min_occupancy_log_ << endl;
 
+  //计算三个坐标轴分别有多少格子
   for (int i = 0; i < 3; ++i)
     mp_.map_voxel_num_(i) = ceil(mp_.map_size_(i) / mp_.resolution_);
 
@@ -116,6 +119,7 @@ void GridMap::initMap(ros::NodeHandle &nh)
   }
 
   // use odometry and point cloud
+  //订阅里程计信息和点云
   indep_cloud_sub_ =
       node_.subscribe<sensor_msgs::PointCloud2>("/grid_map/cloud", 10, &GridMap::cloudCallback, this);
   indep_odom_sub_ =
@@ -124,6 +128,7 @@ void GridMap::initMap(ros::NodeHandle &nh)
   occ_timer_ = node_.createTimer(ros::Duration(0.05), &GridMap::updateOccupancyCallback, this);
   vis_timer_ = node_.createTimer(ros::Duration(0.05), &GridMap::visCallback, this);
 
+  //定义发布地图的话题，发布原地图和膨胀后的地图
   map_pub_ = node_.advertise<sensor_msgs::PointCloud2>("/grid_map/occupancy", 10);
   map_inf_pub_ = node_.advertise<sensor_msgs::PointCloud2>("/grid_map/occupancy_inflate", 10);
 
@@ -214,7 +219,7 @@ void GridMap::projectDepthImage()
 
   // cout << "rotate: " << md_.camera_q_.toRotationMatrix() << endl;
   // std::cout << "pos in proj: " << md_.camera_pos_ << std::endl;
-
+  //根据某个点云在相机投影的位置和深度计算点云位置
   if (!mp_.use_depth_filter_)
   {
     for (int v = 0; v < rows; v++)
@@ -352,12 +357,13 @@ void GridMap::raycastProcess()
 
   for (int i = 0; i < md_.proj_points_cnt; ++i)
   {
+    //投影点的位置
     pt_w = md_.proj_points_[i];
 
     // set flag for projected point
-
     if (!isInMap(pt_w))
     {
+      //如果点不在地图内，则找到地图内离这个点最近的点
       pt_w = closetPointInMap(pt_w, md_.camera_pos_);
 
       length = (pt_w - md_.camera_pos_).norm();
@@ -369,6 +375,7 @@ void GridMap::raycastProcess()
     }
     else
     {
+      //如果这个点在地图内，但是长度已经超过最大投影长度，则仍然设置0，否则设置1
       length = (pt_w - md_.camera_pos_).norm();
 
       if (length > mp_.max_ray_length_)
@@ -494,6 +501,7 @@ void GridMap::raycastProcess()
 
 Eigen::Vector3d GridMap::closetPointInMap(const Eigen::Vector3d &pt, const Eigen::Vector3d &camera_pt)
 {
+  //
   Eigen::Vector3d diff = pt - camera_pt;
   Eigen::Vector3d max_tc = mp_.map_max_boundary_ - camera_pt;
   Eigen::Vector3d min_tc = mp_.map_min_boundary_ - camera_pt;
@@ -717,9 +725,10 @@ void GridMap::depthPoseCallback(const sensor_msgs::ImageConstPtr &img,
 }
 void GridMap::odomCallback(const nav_msgs::OdometryConstPtr &odom)
 {
+  //什么意思？
   if (md_.has_first_depth_)
     return;
-
+  //根据里程计，得到当前位置信息
   md_.camera_pos_(0) = odom->pose.pose.position.x;
   md_.camera_pos_(1) = odom->pose.pose.position.y;
   md_.camera_pos_(2) = odom->pose.pose.position.z;
@@ -729,24 +738,28 @@ void GridMap::odomCallback(const nav_msgs::OdometryConstPtr &odom)
 
 void GridMap::cloudCallback(const sensor_msgs::PointCloud2ConstPtr &img)
 {
-
+  //获得最新的点云数据
   pcl::PointCloud<pcl::PointXYZ> latest_cloud;
   pcl::fromROSMsg(*img, latest_cloud);
 
   md_.has_cloud_ = true;
 
+  //如果没有里程计信息，也无法更新占据栅格地图
   if (!md_.has_odom_)
   {
     std::cout << "no odom!" << std::endl;
     return;
   }
-
+  //如果没有点云数据，直接return
   if (latest_cloud.points.size() == 0)
     return;
 
+  //如果当前里程计信息不对，不完整或数值离谱则返回
   if (isnan(md_.camera_pos_(0)) || isnan(md_.camera_pos_(1)) || isnan(md_.camera_pos_(2)))
     return;
 
+
+  //把局部区域的地图置为0
   this->resetBuffer(md_.camera_pos_ - mp_.local_update_range_,
                     md_.camera_pos_ + mp_.local_update_range_);
 
@@ -774,11 +787,11 @@ void GridMap::cloudCallback(const sensor_msgs::PointCloud2ConstPtr &img)
     /* point inside update range */
     Eigen::Vector3d devi = p3d - md_.camera_pos_;
     Eigen::Vector3i inf_pt;
-
+    //只有当前点云在局部更新范围内才更新
     if (fabs(devi(0)) < mp_.local_update_range_(0) && fabs(devi(1)) < mp_.local_update_range_(1) &&
         fabs(devi(2)) < mp_.local_update_range_(2))
     {
-
+      //inf_step膨胀的大小与分辨率的比值
       /* inflate the point */
       for (int x = -inf_step; x <= inf_step; ++x)
         for (int y = -inf_step; y <= inf_step; ++y)
@@ -797,13 +810,15 @@ void GridMap::cloudCallback(const sensor_msgs::PointCloud2ConstPtr &img)
             min_y = min(min_y, p3d_inf(1));
             min_z = min(min_z, p3d_inf(2));
 
+            //将位置转换为整数
             posToIndex(p3d_inf, inf_pt);
 
+            //如果当前膨胀后的格子不在地图内，则不需要考虑
             if (!isInMap(inf_pt))
               continue;
-
+            //返回格子地址，一个整数
             int idx_inf = toAddress(inf_pt);
-
+            //将得到的格子状态置为1
             md_.occupancy_buffer_inflate_[idx_inf] = 1;
           }
     }
