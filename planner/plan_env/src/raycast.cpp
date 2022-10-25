@@ -224,7 +224,14 @@ void Raycast(const Eigen::Vector3d& start, const Eigen::Vector3d& end, const Eig
     }
   }
 }
-
+/**
+ * @brief   计算遍历的一些参数
+ * @Description 步长有1，0，-1，假设x方向现在是1.3个格子，目标点为50个格子，那么首先计算（1-0.3）/50，这也就是初始值
+ * 然后每次x方向遍历后加1，也就是（2-0.3）/50，直到到最终的x_加到了终点位置。
+ * @param[in]   start 开始的位置，但是是用体素表示，不是实际位置
+ * @param[in]   end 结束的位置，也用体素表示
+ * @return  bool
+*/
 bool RayCaster::setInput(const Eigen::Vector3d& start,
                          const Eigen::Vector3d& end /* , const Eigen::Vector3d& min,
                          const Eigen::Vector3d& max */) {
@@ -232,7 +239,7 @@ bool RayCaster::setInput(const Eigen::Vector3d& start,
   end_ = end;
   // max_ = max;
   // min_ = min;
-
+  //现在输入进来的start和end实际上是多少个格子
   x_ = (int)std::floor(start_.x());
   y_ = (int)std::floor(start_.y());
   z_ = (int)std::floor(start_.z());
@@ -247,6 +254,7 @@ bool RayCaster::setInput(const Eigen::Vector3d& start,
   dy_ = endY_ - y_;
   dz_ = endZ_ - z_;
 
+  //如果等于0则返回0，小于0则返回-1，大于0则返回1
   // Direction to increment x,y,z when stepping.
   stepX_ = (int)signum((int)dx_);
   stepY_ = (int)signum((int)dy_);

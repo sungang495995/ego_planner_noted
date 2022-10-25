@@ -125,6 +125,7 @@ void GridMap::initMap(ros::NodeHandle &nh)
   indep_odom_sub_ =
       node_.subscribe<nav_msgs::Odometry>("/grid_map/odom", 10, &GridMap::odomCallback, this);
 
+  //两个定时器，更新栅格地图并发布地图消息
   occ_timer_ = node_.createTimer(ros::Duration(0.05), &GridMap::updateOccupancyCallback, this);
   vis_timer_ = node_.createTimer(ros::Duration(0.05), &GridMap::visCallback, this);
 
@@ -166,6 +167,7 @@ void GridMap::resetBuffer(Eigen::Vector3d min_pos, Eigen::Vector3d max_pos)
 {
 
   Eigen::Vector3i min_id, max_id;
+  //获得三维每一个维度的最大值和最小值，并设置为0
   posToIndex(min_pos, min_id);
   posToIndex(max_pos, max_id);
 
@@ -190,18 +192,22 @@ int GridMap::setCacheOccupancy(Eigen::Vector3d pos, int occ)
   posToIndex(pos, id);
   int idx_ctns = toAddress(id);
 
+  //这个体素被发现的次数加一
   md_.count_hit_and_miss_[idx_ctns] += 1;
 
+  //如果这个体素刚被体素则将其push到缓存体素中
   if (md_.count_hit_and_miss_[idx_ctns] == 1)
   {
     md_.cache_voxel_.push(id);
   }
 
+  //如果这个体素是障碍物则加一
   if (occ == 1)
     md_.count_hit_[idx_ctns] += 1;
 
   return idx_ctns;
 }
+
 
 void GridMap::projectDepthImage()
 {
@@ -239,11 +245,13 @@ void GridMap::projectDepthImage()
 
         if (u == 320 && v == 240)
           std::cout << "depth: " << depth << std::endl;
+        //把计算出来的3D位置保存起来
         md_.proj_points_[md_.proj_points_cnt++] = proj_pt;
       }
     }
   }
   /* use depth filter */
+  //深度滤波，和上面不同的是对深度做了一些处理
   else
   {
 
@@ -328,7 +336,12 @@ void GridMap::projectDepthImage()
   md_.last_camera_q_ = md_.camera_q_;
   md_.last_depth_image_ = md_.depth_image_;
 }
-
+/**
+ * @brief   射线投影
+ * @Description 上面过程得到了点云的3d位置，现在要做射线投影
+ * @param[in]   投影的3d点 
+ * @return  void
+*/
 void GridMap::raycastProcess()
 {
   // if (md_.proj_points_.size() == 0)
@@ -466,7 +479,6 @@ void GridMap::raycastProcess()
 
   while (!md_.cache_voxel_.empty())
   {
-
     Eigen::Vector3i idx = md_.cache_voxel_.front();
     int idx_ctns = toAddress(idx);
     md_.cache_voxel_.pop();
@@ -493,6 +505,8 @@ void GridMap::raycastProcess()
       md_.occupancy_buffer_[idx_ctns] = mp_.clamp_min_log_;
     }
 
+
+    //clamp_min_log_和clamp_max_log_应该是体素状态的最大值和最小值
     md_.occupancy_buffer_[idx_ctns] =
         std::min(std::max(md_.occupancy_buffer_[idx_ctns] + log_odds_update, mp_.clamp_min_log_),
                  mp_.clamp_max_log_);
@@ -653,8 +667,9 @@ void GridMap::clearAndInflateLocalMap()
 
 void GridMap::visCallback(const ros::TimerEvent & /*event*/)
 {
-
+  //发布地图，用来在rviz显示
   publishMap();
+  //发布膨胀后的地图用来在rviz显示
   publishMapInflate(true);
 }
 
@@ -671,7 +686,7 @@ void GridMap::updateOccupancyCallback(const ros::TimerEvent & /*event*/)
   // t2 = ros::Time::now();
   raycastProcess();
   // t3 = ros::Time::now();
-
+  //注释掉没有影响
   if (md_.local_updated_)
     clearAndInflateLocalMap();
 
@@ -723,6 +738,7 @@ void GridMap::depthPoseCallback(const sensor_msgs::ImageConstPtr &img,
     md_.occ_need_update_ = false;
   }
 }
+//获得当前里程计信息
 void GridMap::odomCallback(const nav_msgs::OdometryConstPtr &odom)
 {
   //什么意思？
@@ -736,6 +752,13 @@ void GridMap::odomCallback(const nav_msgs::OdometryConstPtr &odom)
   md_.has_odom_ = true;
 }
 
+/**
+ * @brief   生成膨胀后的局部地图
+ * @Description 根据点云和里程计信息，得到局部膨胀地图
+ * @param[in]   PointCloud2 点云数据
+ * @param[out]   occupancy_buffer_inflate_ 膨胀后的地图
+ * @return  void
+*/
 void GridMap::cloudCallback(const sensor_msgs::PointCloud2ConstPtr &img)
 {
   //获得最新的点云数据
@@ -767,6 +790,7 @@ void GridMap::cloudCallback(const sensor_msgs::PointCloud2ConstPtr &img)
   Eigen::Vector3d p3d, p3d_inf;
 
   int inf_step = ceil(mp_.obstacles_inflation_ / mp_.resolution_);
+  //x和y对应膨胀，但z只膨胀两次，因为无人机z方向比较矮
   int inf_step_z = 1;
 
   double max_x, max_y, max_z, min_x, min_y, min_z;
@@ -837,6 +861,7 @@ void GridMap::cloudCallback(const sensor_msgs::PointCloud2ConstPtr &img)
   posToIndex(Eigen::Vector3d(max_x, max_y, max_z), md_.local_bound_max_);
   posToIndex(Eigen::Vector3d(min_x, min_y, min_z), md_.local_bound_min_);
 
+  //bound函数是为了使得求出来的数值在地图范围内
   boundIndex(md_.local_bound_min_);
   boundIndex(md_.local_bound_max_);
 }
@@ -864,6 +889,8 @@ void GridMap::publishMap()
     for (int y = min_cut(1); y <= max_cut(1); ++y)
       for (int z = min_cut(2); z <= max_cut(2); ++z)
       {
+        //发现这块一直在输出-2.0043
+        //ROS_INFO_STREAM("occupancy_buffer_" << md_.occupancy_buffer_[toAddress(x, y, z)]);
         if (md_.occupancy_buffer_[toAddress(x, y, z)] < mp_.min_occupancy_log_)
           continue;
 
@@ -913,6 +940,8 @@ void GridMap::publishMapInflate(bool all_info)
     for (int y = min_cut(1); y <= max_cut(1); ++y)
       for (int z = min_cut(2); z <= max_cut(2); ++z)
       {
+        //发现这块一直在输出-2.0043
+        //ROS_INFO_STREAM("occupancy_buffer_inflate_" << md_.occupancy_buffer_[toAddress(x, y, z)]);
         if (md_.occupancy_buffer_inflate_[toAddress(x, y, z)] == 0)
           continue;
 
