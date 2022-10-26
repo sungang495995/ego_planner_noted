@@ -55,6 +55,7 @@ void GridMap::initMap(ros::NodeHandle &nh)
   mp_.map_origin_ = Eigen::Vector3d(-x_size / 2.0, -y_size / 2.0, mp_.ground_height_);
   mp_.map_size_ = Eigen::Vector3d(x_size, y_size, z_size);
 
+  //logit(x) = log(x/(1-x))
   mp_.prob_hit_log_ = logit(mp_.p_hit_);
   mp_.prob_miss_log_ = logit(mp_.p_miss_);
   mp_.clamp_min_log_ = logit(mp_.p_min_);
@@ -802,7 +803,7 @@ void GridMap::cloudCallback(const sensor_msgs::PointCloud2ConstPtr &img)
   max_x = mp_.map_min_boundary_(0);
   max_y = mp_.map_min_boundary_(1);
   max_z = mp_.map_min_boundary_(2);
-
+  //publishOriginMap(latest_cloud);
   for (size_t i = 0; i < latest_cloud.points.size(); ++i)
   {
     pt = latest_cloud.points[i];
@@ -811,6 +812,8 @@ void GridMap::cloudCallback(const sensor_msgs::PointCloud2ConstPtr &img)
     /* point inside update range */
     Eigen::Vector3d devi = p3d - md_.camera_pos_;
     Eigen::Vector3i inf_pt;
+ 
+
     //只有当前点云在局部更新范围内才更新
     if (fabs(devi(0)) < mp_.local_update_range_(0) && fabs(devi(1)) < mp_.local_update_range_(1) &&
         fabs(devi(2)) < mp_.local_update_range_(2))
@@ -866,6 +869,82 @@ void GridMap::cloudCallback(const sensor_msgs::PointCloud2ConstPtr &img)
   boundIndex(md_.local_bound_max_);
 }
 
+void GridMap::publishOriginMap(pcl::PointCloud<pcl::PointXYZ> latest_cloud)
+{
+  pcl::PointXYZ pt;
+  Eigen::Vector3d p3d, p3d_inf;
+  this->resetBuffer(md_.camera_pos_ - mp_.local_update_range_,
+                    md_.camera_pos_ + mp_.local_update_range_);
+  double max_x, max_y, max_z, min_x, min_y, min_z;
+
+  min_x = mp_.map_max_boundary_(0);
+  min_y = mp_.map_max_boundary_(1);
+  min_z = mp_.map_max_boundary_(2);
+
+  max_x = mp_.map_min_boundary_(0);
+  max_y = mp_.map_min_boundary_(1);
+  max_z = mp_.map_min_boundary_(2);
+
+  for (size_t i = 0; i < latest_cloud.points.size(); ++i)
+  {
+    pt = latest_cloud.points[i];
+    p3d(0) = pt.x, p3d(1) = pt.y, p3d(2) = pt.z;
+
+    /* point inside update range */
+    Eigen::Vector3d devi = p3d - md_.camera_pos_;
+    Eigen::Vector3i inf_pt;
+    //只有当前点云在局部更新范围内才更新
+    if (fabs(devi(0)) < mp_.local_update_range_(0) && fabs(devi(1)) < mp_.local_update_range_(1) &&
+        fabs(devi(2)) < mp_.local_update_range_(2))
+    {
+      //inf_step膨胀的大小与分辨率的比值
+      /* inflate the point */
+
+
+            p3d_inf(0) = pt.x;
+            p3d_inf(1) = pt.y;
+            p3d_inf(2) = pt.z;
+
+            max_x = max(max_x, p3d_inf(0));
+            max_y = max(max_y, p3d_inf(1));
+            max_z = max(max_z, p3d_inf(2));
+
+            min_x = min(min_x, p3d_inf(0));
+            min_y = min(min_y, p3d_inf(1));
+            min_z = min(min_z, p3d_inf(2));
+
+            //将位置转换为整数
+            posToIndex(p3d_inf, inf_pt);
+
+            //如果当前膨胀后的格子不在地图内，则不需要考虑
+            if (!isInMap(inf_pt))
+              continue;
+            //返回格子地址，一个整数
+            int idx_inf = toAddress(inf_pt);
+            //将得到的格子状态置为1
+            md_.occupancy_buffer_[idx_inf] = 1;
+    }
+  }
+
+  min_x = min(min_x, md_.camera_pos_(0));
+  min_y = min(min_y, md_.camera_pos_(1));
+  min_z = min(min_z, md_.camera_pos_(2));
+
+  max_x = max(max_x, md_.camera_pos_(0));
+  max_y = max(max_y, md_.camera_pos_(1));
+  max_z = max(max_z, md_.camera_pos_(2));
+
+  max_z = max(max_z, mp_.ground_height_);
+
+  posToIndex(Eigen::Vector3d(max_x, max_y, max_z), md_.local_bound_max_);
+  posToIndex(Eigen::Vector3d(min_x, min_y, min_z), md_.local_bound_min_);
+
+  //bound函数是为了使得求出来的数值在地图范围内
+  boundIndex(md_.local_bound_min_);
+  boundIndex(md_.local_bound_max_);
+}
+
+
 void GridMap::publishMap()
 {
 
@@ -890,10 +969,11 @@ void GridMap::publishMap()
       for (int z = min_cut(2); z <= max_cut(2); ++z)
       {
         //发现这块一直在输出-2.0043
-        //ROS_INFO_STREAM("occupancy_buffer_" << md_.occupancy_buffer_[toAddress(x, y, z)]);
-        if (md_.occupancy_buffer_[toAddress(x, y, z)] < mp_.min_occupancy_log_)
+        //ROS_INFO_STREAM("min_occupancy_log_" << mp_.min_occupancy_log_);
+        if ((double)md_.occupancy_buffer_[toAddress(x, y, z)] < mp_.min_occupancy_log_)
           continue;
-
+        //if(md_.occupancy_buffer_[toAddress(x, y, z)] == 1)
+          //ROS_INFO_STREAM("occupancy_buffer_" << md_.occupancy_buffer_[toAddress(x, y, z)]);
         Eigen::Vector3d pos;
         indexToPos(Eigen::Vector3i(x, y, z), pos);
         if (pos(2) > mp_.visualization_truncate_height_)

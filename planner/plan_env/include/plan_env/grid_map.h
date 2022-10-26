@@ -190,6 +190,8 @@ private:
                          const geometry_msgs::PoseStampedConstPtr& pose);
   void depthOdomCallback(const sensor_msgs::ImageConstPtr& img, const nav_msgs::OdometryConstPtr& odom);
   void cloudCallback(const sensor_msgs::PointCloud2ConstPtr& img);
+  //新增发布原始地图
+  void publishOriginMap(const pcl::PointCloud<pcl::PointXYZ> latest_cloud);
   void odomCallback(const nav_msgs::OdometryConstPtr& odom);
 
   // update occupancy by raycasting
